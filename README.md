@@ -18,7 +18,7 @@
 - **フロントエンド**: React Router v7 + TypeScript + shadcn/ui + Tailwind CSS
 - **バックエンド**: Hono on Cloudflare Workers
 - **データベース**: Cloudflare D1 + Drizzle ORM
-- **認証**: OIDC（Google）+ 自前セッション管理
+- **認証**: OIDC / OAuth2 (Google, GitHub) + 自前セッション管理
 - **モノレポ**: pnpm workspace
 
 ## クイックスタート

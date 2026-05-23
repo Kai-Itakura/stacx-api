@@ -78,19 +78,18 @@ Cloudflare Workers ⇄ Google IdP (OIDC)
 9. レスポンス（メモオブジェクト）を返却
 10. RR v7 が revalidate して一覧を更新
 
-### 2. 認証フロー（OIDC）
+### 2. 認証フロー（OIDC/OAuth2）
 
-1. ユーザーがログインボタンを押す
-2. RR v7 が `/login` へ遷移
-3. Hono Workers `/auth/google` で state 生成
-4. Google OIDC へリダイレクト
-5. ユーザーが Google で認証
-6. Google が `/auth/callback` へリダイレクト
-7. Hono Workers が code を検証し ID Token を取得
-8. users テーブルに upsert
-9. sessions テーブルにセッションを保存
-10. httpOnly Cookie を発行
-11. RR v7 が `/` へリダイレクト
+1. ユーザーがログインボタン（Google/GitHub等）を押す
+2. RR v7 が `/login/:provider` へ遷移
+3. Hono Workers が `state` 生成し、プロバイダへリダイレクト
+4. ユーザーが IdP で認証
+5. IdP が `/auth/callback/:provider` へリダイレクト
+6. Hono Workers が `code` をトークンに交換し、ユーザー情報を取得
+7. `user_identities` を確認し、ユーザー特定または新規作成
+8. `sessions` テーブルにセッションを保存
+9. httpOnly Cookie を発行
+10. RR v7 が `/` へリダイレクト
 
 詳細: `docs/05-auth.md`
 
