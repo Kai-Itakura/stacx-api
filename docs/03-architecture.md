@@ -16,21 +16,16 @@ stacx/
 │   │   │   └── root.tsx
 │   │   ├── public/
 │   │   └── package.json
-│   ├── api/             # Hono on Workers バックエンド
-│   │   ├── src/
-│   │   │   ├── routes/
-│   │   │   ├── db/
-│   │   │   │   ├── schema.ts
-│   │   │   │   └── migrations/
-│   │   │   ├── auth/
-│   │   │   ├── middleware/
-│   │   │   └── index.ts
-│   │   ├── wrangler.toml
-│   │   └── package.json
-│   └── shared/          # 共通型定義・ユーティリティ
+│   └── api/             # Hono on Workers バックエンド
 │       ├── src/
-│       │   ├── types/
-│       │   └── schemas/  # Zod スキーマ
+│       │   ├── routes/
+│       │   ├── db/
+│       │   │   ├── schema.ts
+│       │   │   └── migrations/
+│       │   ├── auth/
+│       │   ├── middleware/
+│       │   └── index.ts
+│       ├── wrangler.toml
 │       └── package.json
 ├── pnpm-workspace.yaml
 └── package.json
@@ -104,9 +99,9 @@ Cloudflare Workers ⇄ Google IdP (OIDC)
 
 ### 型共有戦略
 
-- `packages/shared` に Zod スキーマと型定義を集約
-- フロント・バック双方からインポート
-- API のレスポンス型は Hono RPC で自動配布される（追加の型定義不要）
+- API のレスポンス型・リクエスト型は **Hono RPC で自動配布される**（web 側は `client<typeof app>` で型推論）
+- Zod スキーマは `packages/api/src/` 内に配置し、Hono の `zValidator` で利用
+- web ↔ api 双方が依存する純粋な共通モジュールが必要になった時点で `packages/shared` を切り出す（YAGNI、Phase 1 では作らない）
 
 ### スクリプト実行
 
@@ -125,13 +120,21 @@ Cloudflare Workers ⇄ Google IdP (OIDC)
 
     GOOGLE_CLIENT_ID=...
     GOOGLE_CLIENT_SECRET=...
-    SESSION_SECRET=...
     APP_BASE_URL=http://localhost:5173
 
 本番は `wrangler secret put` で登録。
 
-### packages/web（.env）
+### packages/web
 
-    VITE_API_BASE_URL=http://localhost:8787
+web からの API 呼び出しはすべて相対パス (`/api/...`) で行う。ローカル開発時は Vite の dev proxy で `/api/*` を wrangler dev (`http://localhost:8787`) に転送し、ブラウザから見た同一オリジン挙動を本番 (`stacx.dev/*` Pages, `stacx.dev/api/*` Workers) と一致させる。
 
-本番は Cloudflare Pages の環境変数で設定。
+    // packages/web/vite.config.ts
+    export default defineConfig({
+      server: {
+        proxy: {
+          '/api': 'http://localhost:8787',
+        },
+      },
+    });
+
+これにより `VITE_API_BASE_URL` のような環境変数は不要、CORS / cross-origin Cookie 設定も発生しない。

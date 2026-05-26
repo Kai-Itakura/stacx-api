@@ -2,7 +2,9 @@
 
 ## 概要
 
-StacX は **Google** と **GitHub** の 2 つの IdP に対応します。将来的に Microsoft / Apple / その他 IdP を追加できるよう、**プロバイダ非依存な抽象化**を施した設計とします。
+StacX は将来的に複数の IdP（Google / GitHub / Microsoft 等）に対応できるよう、**プロバイダ非依存な抽象化**を施した設計とします。
+
+**Phase 1 では Google OIDC のみを実装**し、Phase 2 以降で GitHub などを追加します。設計（`Provider` 抽象 + `user_identities` テーブル）は最初から多 IdP 前提とし、Phase 2 で IdP を足すときはコード追加だけで済む状態を目指します。
 
 セッションは **自前管理（D1 保存）** です。
 
@@ -17,35 +19,40 @@ StacX は **Google** と **GitHub** の 2 つの IdP に対応します。将来
 
 ---
 
-## 対応 IdP（Phase 1）
+## 対応 IdP
+
+### Phase 1（実装対象）
 
 | IdP | 種別 | スコープ |
 |---|---|---|
 | Google | OIDC | `openid email profile` |
-| GitHub | OAuth2 + Email API | `read:user user:email` |
 
 ### Phase 2 で追加候補
-- Microsoft（Entra ID）
-- Apple
-- GitLab
+
+| IdP | 種別 | スコープ |
+|---|---|---|
+| GitHub | OAuth2 + Email API | `read:user user:email` |
+| Microsoft（Entra ID） | OIDC | `openid email profile` |
+| Apple | OIDC | `name email` |
+| GitLab | OIDC | `openid email profile` |
 
 ---
 
-## アカウント連携戦略
+## Link 戦略
 
-### Phase 1（個人利用）: 手動連携のみ
+### Phase 1（個人利用）: 手動 Link のみ
 
-- 初回ログイン: 新規アカウント作成
-- 既存ユーザーが別 IdP を追加したい場合: ログイン状態で設定画面から「連携する」操作
-- メール一致による自動マージは **行わない**
+- 初回ログイン: 新規 User 作成
+- 既存 User が別 IdP を追加したい場合: ログイン状態で設定画面から「連携する」操作
+- メール一致による **Auto-link は行わない**
 
 ### Phase 2（SaaS 化）: 業界標準ハイブリッド
 
-- **検証済みメール**が既存アカウントと一致した場合: 自動マージ（マージ前にユーザーに通知・確認画面表示）
-- メール不一致 or 未検証メール: 新規アカウント作成、設定画面から手動連携可能
-- メール詐称対策のため、**信頼できる IdP（Google, GitHub 等）に限定**して自動マージを発動
+- **検証済みメール**が既存 User と一致した場合: Auto-link（実行前に User に通知・確認画面表示）
+- メール不一致 or 未検証メール: 新規 User 作成、設定画面から手動 Link 可能
+- メール詐称対策のため、**信頼できる IdP（Google, GitHub 等）に限定**して Auto-link を発動
 
-### 自動マージしない（Phase 1 で除外する）ケース
+### Auto-link を発動しない（Phase 1 で除外する）ケース
 
 - IdP がメールを返さない場合
 - IdP がメールを `email_verified = false` で返した場合
@@ -55,35 +62,38 @@ StacX は **Google** と **GitHub** の 2 つの IdP に対応します。将来
 
 ## DB スキーマ
 
-### users（アプリ内のユーザー実体）
+### users（User 実体、ID とタイムスタンプのみ）
 
 ```typescript
 {
   id: string              // ULID
-  email: string | null    // 表示用、IdP 由来。一意制約はかけない
-  name: string | null
-  picture_url: string | null
   created_at: Date
   updated_at: Date
-  last_login_at: Date
+  last_login_at: Date     // ログイン履歴集計用
 }
 ```
 
-### user_identities（IdP との紐づけ、1 ユーザー : N IdP）
+User には表示情報を持たせない。`name` / `email` / `picture_url` の Single Source of Truth は `user_identities` 側。
+
+### user_identities（IdP との紐づけ = Identity、1 User : N Identity）
 
 ```typescript
 {
   id: string              // ULID
   user_id: string         // FK → users.id
-  provider: string        // "google" | "github" | ...（将来拡張）
-  provider_sub: string    // IdP 側のユーザー ID（Google: sub, GitHub: id）
-  provider_email: string | null
-  provider_email_verified: boolean
+  provider: string        // IdP 識別子 "google" | "github" | ...
+  provider_sub: string    // IdP 側の不変ユーザー ID（OIDC sub クレーム）
+  email: string | null    // IdP からのクレーム
+  email_verified: boolean // 〃 (Phase 2 Auto-link ゲート用)
+  name: string | null     // 〃 (表示名)
+  picture_url: string | null  // 〃
   created_at: Date
-  updated_at: Date
+  updated_at: Date        // ログイン毎に更新 → 「最後に使った Identity」の根拠
 }
 // UNIQUE(provider, provider_sub)
 ```
+
+表示情報を取り出すルール: User に紐づく `user_identities` のうち `updated_at` が最大の行を採用する。Phase 1 は 1 User : 1 Identity なので自明、Phase 2 で複数 Identity になっても「最後に使った IdP の情報」が自然に出る。
 
 ### sessions
 
@@ -100,10 +110,10 @@ StacX は **Google** と **GitHub** の 2 つの IdP に対応します。将来
 
 ### 設計のポイント
 
-- `users.email` に **一意制約をかけない**。同じメールでも別アカウントが存在しうる（手動連携前の状態）
+- User は ID のみを持ち、表示情報 (email, name, picture_url) は `user_identities` を唯一の真実とする
 - 一意性は `user_identities(provider, provider_sub)` で担保
 - IdP 追加は `user_identities` にレコードを増やすだけ
-- アカウント削除時は `user_identities` と `sessions` も CASCADE 削除
+- User 削除時は `user_identities` と `sessions` も CASCADE 削除
 
 ---
 
@@ -112,10 +122,10 @@ StacX は **Google** と **GitHub** の 2 つの IdP に対応します。将来
 ### 1. ログイン開始
 
 ```
-GET /auth/login/:provider
+GET /api/auth/login/:provider
 ```
 
-- `:provider` は `google` または `github`
+- Phase 1 では `:provider` は `google` のみ。Phase 2 で `github` 等を追加
 - `arctic` で `state` と（OIDC の場合）`codeVerifier` を生成
 - httpOnly Cookie に一時保存（10 分有効）
   - `oauth_state`
@@ -126,7 +136,7 @@ GET /auth/login/:provider
 ### 2. コールバック
 
 ```
-GET /auth/callback/:provider?code=...&state=...
+GET /api/auth/callback/:provider?code=...&state=...
 ```
 
 #### 共通処理
@@ -139,8 +149,8 @@ GET /auth/callback/:provider?code=...&state=...
 
 ```typescript
 type IdentityProfile = {
-  provider: "google" | "github";
-  providerSub: string;          // IdP 側の一意 ID
+  provider: ProviderId;         // IdP 識別子。Phase 1: "google"
+  providerSub: string;          // IdP の sub クレーム
   email: string | null;
   emailVerified: boolean;
   name: string | null;
@@ -148,26 +158,27 @@ type IdentityProfile = {
 }
 ```
 
-#### アカウント判定ロジック（Phase 1）
+#### User 判定ロジック（Phase 1）
 
 ```
 1. user_identities で (provider, provider_sub) を検索
-   ├─ ヒット → そのユーザーでログイン
-   └─ ヒットせず → 次へ
-
-2. ログイン中（既存セッションあり）か判定
-   ├─ ログイン中 → 既存アカウントに連携を追加（user_identities に INSERT）
-   └─ 未ログイン → 新規ユーザー作成 + user_identities に INSERT
+   ├─ ヒット → その User でログイン (既存 Session があれば破棄して新規発行)
+   └─ ヒットせず → 新規 User 作成 + user_identities に INSERT
 ```
 
-#### アカウント判定ロジック（Phase 2 で追加）
+Phase 1 は IdP が 1 つ (Google) なので、UI から「別 IdP を追加する」フローが発火しない。callback で「ログイン中なら Link 追加」分岐は Phase 2 で導入する。
+
+#### User 判定ロジック（Phase 2 で追加）
 
 ```
-2.5. 未ログイン かつ メール検証済み の場合:
-   users.email で検索
-   ├─ ヒット → 「既存アカウントを発見しました。連携しますか？」確認画面
-   │              └─ ユーザー承認 → 連携追加
-   └─ ヒットせず → 新規ユーザー作成
+1.5. ログイン中（既存 Session あり）の場合:
+   既存 User に Identity を追加 (Link)
+
+2. 未ログイン かつ メール検証済み かつ 信頼 IdP の場合:
+   user_identities.email で既存 User 検索
+   ├─ ヒット → 「既存 User を発見しました。連携しますか？」確認画面 (Auto-link 提案)
+   │              └─ User 承認 → Identity 追加
+   └─ ヒットせず → 新規 User 作成
 ```
 
 ### 3. セッション発行
@@ -175,9 +186,44 @@ type IdentityProfile = {
 - `sessions` テーブルにレコード作成
   - `id`: ランダム 32 バイト hex（oslo で生成）
   - `expires_at`: 30 日後
-- セッション ID を httpOnly Cookie で発行
-  - `Secure`, `HttpOnly`, `SameSite=Lax`
+- セッション ID を Cookie で発行
 - `/` へリダイレクト
+
+#### Cookie の仕様
+
+| 属性 | 本番 | ローカル開発 |
+|---|---|---|
+| 名前 | `__Host-stacx_session` | `stacx_session` |
+| 値 | セッション ID（32 バイト hex） | 同左 |
+| HttpOnly | `true` | `true` |
+| Secure | `true` | `false` |
+| SameSite | `Lax` | `Lax` |
+| Path | `/` | `/` |
+| Domain | 指定しない | 指定しない |
+| Max-Age | 30 日 | 30 日 |
+
+本番では `__Host-` プレフィックスを付けることでブラウザに以下を強制させ、サブドメイン汚染や HTTPS 漏れを防ぐ:
+
+- `Secure` 必須
+- `Path=/` 必須
+- `Domain` 指定不可（オリジン固定）
+
+ローカル開発は `http://localhost` で `Secure` を付けられず `__Host-` も使えないため、プレフィックスなしの `stacx_session` を使う。Cookie 名は環境変数または `import.meta.env.PROD` 相当のフラグで切り替える。
+
+Session の有効期限は **絶対 30 日固定**。スライディング延長は Phase 1 では入れない。利用頻度の高い個人ユーザーはほぼ毎回 30 日経過前に新規ログインで Session が再発行されるため、UX 上の不利益は実質ない。Phase 2 で利用頻度がまばらなユーザーが現れたタイミングで再検討する。
+
+CSRF 対策は `SameSite=Lax` に依存し、Phase 1 で追加の CSRF トークンは発行しない。状態変更は POST/PUT/DELETE のみとする規約を守ることが前提。
+
+### Set-Cookie の発行経路
+
+Phase 1 で Session Cookie を **書き換える** エンドポイントは以下 2 つのみ:
+
+| エンドポイント | 呼び出し方 |
+|---|---|
+| `GET /api/auth/callback/:provider` | IdP からのリダイレクト → ブラウザが直接 api に到達 |
+| `POST /api/auth/logout` | ブラウザの `<form method="POST" action="/api/auth/logout">` で直接送信 |
+
+いずれもブラウザが api を直接叩くため、`Set-Cookie` はそのままブラウザに届く。web の `loader` / `action` 経由の API 呼び出しは **データ取得専用** とし、Cookie 書き換えを発生させない。これにより `Set-Cookie` 転送ヘルパは不要になる。
 
 ### 4. リクエスト時の認証
 
@@ -189,30 +235,13 @@ type IdentityProfile = {
 ### 5. ログアウト
 
 ```
-POST /auth/logout
+POST /api/auth/logout
 ```
 
 - セッションを D1 から削除
 - Cookie を即時失効
 
-### 6. IdP 連携追加（設定画面から）
-
-```
-POST /auth/link/:provider
-```
-
-- ログイン必須
-- 通常のログインフローと同じだが、コールバック時に **既存ユーザーに紐づける** 分岐に入る
-- 既に同じ IdP が連携済みなら 409 Conflict
-
-### 7. IdP 連携解除
-
-```
-DELETE /auth/link/:provider
-```
-
-- ログイン必須
-- 解除後にログイン手段がゼロになる場合は拒否（最後の 1 つは外せない）
+Link / Unlink エンドポイントは Phase 2 で導入する。詳細は本ドキュメント末尾「Phase 1 → Phase 2 移行時の追加実装」を参照。
 
 ---
 
@@ -227,26 +256,28 @@ packages/api/src/auth/
 ├── providers/
 │   ├── types.ts                # Provider インターフェース、IdentityProfile 型
 │   ├── registry.ts             # プロバイダ一覧の集約
-│   ├── google.ts               # Google 実装
-│   └── github.ts               # GitHub 実装
+│   └── google.ts               # Google 実装
+│   # github.ts 等は Phase 2 で追加
 └── routes/
-    ├── login.ts                # /auth/login/:provider
-    ├── callback.ts             # /auth/callback/:provider
-    ├── link.ts                 # /auth/link/:provider
-    └── logout.ts               # /auth/logout
+    ├── login.ts                # /api/auth/login/:provider
+    ├── callback.ts             # /api/auth/callback/:provider
+    └── logout.ts               # /api/auth/logout
+    # link.ts は Phase 2 で追加
 ```
 
 ### Provider インターフェース
 
 ```typescript
 type Provider = {
-  id: "google" | "github";
+  id: ProviderId;
   createAuthorizationUrl(state: string, codeVerifier?: string): URL;
   exchangeCode(code: string, codeVerifier?: string): Promise<TokenSet>;
   fetchUserInfo(tokens: TokenSet): Promise<IdentityProfile>;
   usesPKCE: boolean;
 }
 ```
+
+`ProviderId` は実装済みプロバイダの union 型（Phase 1: `"google"`、Phase 2 で `"github"` 等を追加）。
 
 ### プロバイダ追加の手順（将来）
 
@@ -267,34 +298,41 @@ type Provider = {
 | トークン保護 | アクセストークン・ID トークンはサーバー側のみ、フロントに渡さない |
 | セッション固定 | ログイン時に必ず新規セッション ID 発行、ログアウト時に削除 |
 | 有効期限管理 | セッション 30 日、`state`/`code_verifier` Cookie 10 分 |
-| メール詐称対策 | Phase 2 の自動マージは `email_verified=true` かつ信頼 IdP のみ |
-| 連携最終手段の保護 | 最後のログイン手段を削除させない |
+| メール詐称対策 | Phase 2 の Auto-link は `email_verified=true` かつ信頼 IdP のみ |
+| 連携最終手段の保護 (Phase 2) | Unlink 時に最後のログイン手段を削除させない |
 
 ---
 
 ## 環境変数
 
-### Phase 1（Google + GitHub）
+### Phase 1（Google のみ）
 
 ```
 # Google OIDC
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 
-# GitHub OAuth2
-GITHUB_CLIENT_ID=...
-GITHUB_CLIENT_SECRET=...
-
 # 共通
-SESSION_SECRET=...                 # セッション ID 生成のシード
 APP_BASE_URL=https://stacx.dev     # コールバック URL の基点
 ```
 
-各 IdP のコールバック URL は以下：
+Session ID は Workers の CSPRNG (`crypto.getRandomValues`) から 32 バイトの乱数を直接引くため、`SESSION_SECRET` のようなシード値は不要。
+
+コールバック URL:
 
 ```
-{APP_BASE_URL}/auth/callback/google
-{APP_BASE_URL}/auth/callback/github
+{APP_BASE_URL}/api/auth/callback/google
+```
+
+### Phase 2 で追加（GitHub 例）
+
+```
+GITHUB_CLIENT_ID=...
+GITHUB_CLIENT_SECRET=...
+```
+
+```
+{APP_BASE_URL}/api/auth/callback/github
 ```
 
 ローカル開発: `packages/api/.dev.vars` に記述（Git 管理外）
@@ -313,7 +351,7 @@ APP_BASE_URL=https://stacx.dev     # コールバック URL の基点
 - 純粋な OAuth2（OIDC ではない）
 - メール取得には別途 `GET https://api.github.com/user/emails` を呼ぶ必要あり
 - ユーザーがメール非公開設定の場合、`noreply` メールが返る
-  - Phase 2 の自動マージ対象から除外する
+  - Phase 2 の Auto-link 対象から除外する
 - スコープ: `read:user user:email`
 
 ### 将来追加時のチェックリスト
@@ -331,22 +369,39 @@ APP_BASE_URL=https://stacx.dev     # コールバック URL の基点
 |---|---|
 | `state` 不一致 | 400 Bad Request、ログイン画面へ |
 | `code` 交換失敗 | 400 Bad Request、ログイン画面へ「再試行してください」 |
-| IdP がメールを返さない（GitHub） | 新規アカウントは作成可、Phase 2 自動マージは対象外 |
-| 既に同じ IdP が連携済み（連携追加時） | 409 Conflict |
-| 最後の連携を削除しようとした | 422 Unprocessable Entity |
+| IdP がメールを返さない（GitHub、Phase 2） | 新規 User は作成可、Auto-link は対象外 |
+| 既に同じ IdP が Link 済み（Phase 2 Link 時） | 409 Conflict |
+| 最後の Identity を Unlink しようとした（Phase 2） | 422 Unprocessable Entity |
 | セッション切れ | 401 Unauthorized、ログイン画面へリダイレクト |
 
 ---
 
 ## Phase 1 → Phase 2 移行時の追加実装
 
-DB スキーマは変更不要。以下のロジックを追加するだけで Phase 2 に移行可能：
+DB スキーマは変更不要。以下のロジック・エンドポイント・UI を追加するだけで Phase 2 に移行可能。
 
-1. **コールバック時の自動マージロジック**
-   - メール検証済み + 信頼 IdP の場合に `users.email` 検索 → マージ確認画面
-2. **マージ確認画面の UI**（RR v7 側）
-3. **マージ実行 API**（連携追加 + 通知メール）
+### Link / Unlink エンドポイント
+
+```
+POST   /api/auth/link/:provider   # ログイン必須、設定画面から発火
+DELETE /api/auth/link/:provider   # ログイン必須、最後の Identity は削除不可
+```
+
+- `POST` は通常のログインフローと同じ認可リダイレクト経路を辿るが、callback 時に「既存 User に Identity を追加」分岐 (Phase 2 User 判定ロジック 1.5) に入る
+- 既に同じ IdP が Link 済みなら 409 Conflict
+- Unlink 後にログイン手段がゼロになる場合は 422 Unprocessable Entity (「最後の Identity 保護」)
+
+### Auto-link ロジック
+
+1. **コールバック時の Auto-link ロジック**
+   - メール検証済み + 信頼 IdP の場合に `user_identities.email` を検索 → Auto-link 確認画面
+2. **Auto-link 確認画面の UI**（RR v7 側）
+3. **Auto-link 実行 API**（Identity 追加 + 通知メール）
 4. **メール通知機能**（SES や Resend 等を採用検討）
+
+### その他
+
+- 設定画面: 連携済み Identity 一覧 + Link / Unlink ボタン
 
 ---
 

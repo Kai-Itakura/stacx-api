@@ -82,7 +82,6 @@
     cd packages/api
     npx wrangler secret put GOOGLE_CLIENT_ID
     npx wrangler secret put GOOGLE_CLIENT_SECRET
-    npx wrangler secret put SESSION_SECRET
 
 ローカルは `packages/api/.dev.vars` に記述（Git 管理外）。
 
@@ -110,15 +109,32 @@ Conventional Commits を採用:
 
 ---
 
+## ローカル開発の同一オリジン化（Vite dev proxy）
+
+web と api は別ポートで起動するが、ブラウザから見て同一オリジンになるよう Vite proxy で `/api/*` を api ワーカーに転送する。これにより本番 (path 分割同一オリジン、ADR 0001) と挙動が一致し、CORS / cross-origin Cookie の設定が不要になる。
+
+    // packages/web/vite.config.ts
+    export default defineConfig({
+      server: {
+        proxy: {
+          '/api': 'http://localhost:8787',
+        },
+      },
+    });
+
+web からの API 呼び出しは常に相対パス `/api/...` を使う。`VITE_API_BASE_URL` のような環境変数は導入しない。
+
+---
+
 ## トラブルシューティング
 
 ### `wrangler dev` でローカル D1 にデータが入らない
 - `--local` フラグを忘れていないか確認
 - ローカル D1 は `.wrangler/state` 配下に保存される
 
-### CORS エラー
-- API 側で `cors()` ミドルウェアを設定済みか確認
-- 本番では Pages と Workers を同一ドメイン配下にする（カスタムドメイン推奨）
+### `/api/...` を叩いて 404 になる
+- Vite proxy が設定されているか (`vite.config.ts` の `server.proxy`)
+- wrangler dev が `localhost:8787` で起動しているか
 
 ### Hono RPC の型が反映されない
 - API 側で `app.routes` を export しているか
