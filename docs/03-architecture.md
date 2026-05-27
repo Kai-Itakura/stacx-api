@@ -109,8 +109,12 @@ Cloudflare Workers ⇄ Google IdP (OIDC)
     pnpm -r dev
 
     # 個別実行
-    pnpm --filter web dev
-    pnpm --filter api dev
+    pnpm --filter @stacx/web dev
+    pnpm --filter @stacx/api dev
+
+    # ルートのショートカット
+    pnpm dev:api
+    pnpm dev:web
 
 ---
 
