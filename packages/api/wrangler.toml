@@ -1,0 +1,15 @@
+name = "stacx-api"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+
+[vars]
+APP_BASE_URL = "http://localhost:5173"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "stacx-db"
+database_id = "44a30247-7ab9-4ca6-a04e-b2e23ddef369"
+migrations_dir = "src/db/migrations"
+
+[dev]
+port = 8787

@@ -22,40 +22,38 @@
 ## 日常の開発コマンド
 
     # 全パッケージ並列起動
-    pnpm -r dev
+    pnpm dev          # ルートから pnpm -r --parallel dev のエイリアス
 
     # フロントのみ起動
-    pnpm --filter web dev
+    pnpm dev:web      # = pnpm --filter @stacx/web dev
 
     # API のみ起動
-    pnpm --filter api dev
+    pnpm dev:api      # = pnpm --filter @stacx/api dev
 
     # 型チェック
-    pnpm -r typecheck
+    pnpm typecheck    # = pnpm -r typecheck
 
     # Lint
-    pnpm -r lint
+    pnpm lint         # = pnpm -r lint
 
     # ビルド
-    pnpm -r build
+    pnpm build        # = pnpm -r build
 
 ---
 
 ## DB マイグレーション
 
-    cd packages/api
-
     # スキーマ変更後、マイグレーションファイル生成
-    pnpm drizzle-kit generate
+    pnpm --filter @stacx/api db:generate
 
     # ローカル D1 に適用
-    npx wrangler d1 migrations apply stacx-db --local
+    pnpm --filter @stacx/api db:migrate:local
 
     # 本番 D1 に適用
-    npx wrangler d1 migrations apply stacx-db --remote
+    pnpm --filter @stacx/api db:migrate:remote
 
     # DB を直接クエリ（デバッグ用）
-    npx wrangler d1 execute stacx-db --local --command="SELECT * FROM users"
+    cd packages/api && npx wrangler d1 execute stacx-db --local --command="SELECT * FROM users"
 
 ---
 
@@ -63,22 +61,20 @@
 
 ### API（Cloudflare Workers）
 
-    cd packages/api
-    pnpm build
-    npx wrangler deploy
+    pnpm --filter @stacx/api deploy
 
 ### Web（Cloudflare Pages）
 
 - GitHub と連携した自動デプロイを推奨
 - `packages/web` のビルド設定:
-  - Build command: `pnpm --filter web build`
+  - Build command: `pnpm --filter @stacx/web build`
   - Output directory: `packages/web/build/client`
 
 ---
 
 ## Secret 管理
 
-    # 本番 secret 登録
+    # 本番 secret 登録 (packages/api 配下で実行)
     cd packages/api
     npx wrangler secret put GOOGLE_CLIENT_ID
     npx wrangler secret put GOOGLE_CLIENT_SECRET

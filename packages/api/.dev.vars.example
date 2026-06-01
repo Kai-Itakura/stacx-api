@@ -1,0 +1,6 @@
+# Google OIDC (https://console.cloud.google.com/apis/credentials で取得)
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+
+# Callback URL の基点 (本番: https://stacx.dev)
+APP_BASE_URL=http://localhost:5173
