@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# 同一ブランチで新しい push があれば古い実行をキャンセルする。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint & format (Biome)
+        run: pnpm exec biome ci .
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Test with coverage
+        run: pnpm --filter @stacx/api test:coverage
