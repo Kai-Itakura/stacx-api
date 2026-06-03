@@ -123,23 +123,9 @@ User には表示情報を持たせない。`name` / `email` / `picture_url` の
 
 ### 全体シーケンス図
 
-![認証フロー全体シーケンス](./diagrams/auth-flow.svg)
+図のソース（Mermaid）: [`docs/diagrams/auth-flow.mmd`](./diagrams/auth-flow.mmd)
 
-> 図のソースは [`docs/diagrams/auth-flow.mmd`](./diagrams/auth-flow.mmd)。編集したら次のコマンドで SVG を再生成する:
->
-> ```sh
-> pnpm dlx @mermaid-js/mermaid-cli -i docs/diagrams/auth-flow.mmd -o docs/diagrams/auth-flow.svg -p docs/diagrams/.puppeteer.json -b transparent
-> ```
->
-> 初回のみ、レンダリング用に ARM64 Chromium とその依存が必要（`.puppeteer.json` は machine 固有パスを含むため gitignore 済み・各自で作成）:
->
-> ```sh
-> pnpm dlx playwright install chromium          # ~/.cache/ms-playwright/ へ DL（sudo不要）
-> sudo pnpm dlx playwright install-deps chromium # system 依存（実ターミナルで・要 sudo）
-> CHROME=$(find ~/.cache/ms-playwright -name chrome -path '*chrome-linux*' | head -1)
-> printf '{"executablePath":"%s","args":["--no-sandbox","--disable-setuid-sandbox"]}' "$CHROME" \
->   > docs/diagrams/.puppeteer.json
-> ```
+> GitHub や Mermaid 対応エディタ上でこのソースを開くとシーケンス図として描画される。
 
 ### 1. ログイン開始
 
