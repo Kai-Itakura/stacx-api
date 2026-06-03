@@ -29,3 +29,6 @@ pnpm-debug.log*
 
 # Cloudflare
 .dev.vars
+
+# Diagram rendering (machine-specific Chromium path; recreate locally)
+docs/diagrams/.puppeteer.json

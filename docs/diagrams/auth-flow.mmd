@@ -1,0 +1,53 @@
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant B as Browser (web = Pages)
+    participant API as api (Workers) /api/auth/*
+    participant DB as D1 (sessions/users/identities)
+    participant G as Google (IdP)
+
+    Note over U,G: (1) ログイン開始
+    U->>B: ログインボタン a href="/api/auth/login/google"
+    B->>API: GET /api/auth/login/google
+    API->>API: generateState() / generateCodeVerifier()<br/>createAuthorizationURL(state, verifier, [openid,email,profile])
+    API-->>B: 302 to Google authorize URL<br/>Set-Cookie: oauth_state / oauth_code_verifier / oauth_provider<br/>(httpOnly, Lax, 10分)
+    B->>G: 認可エンドポイントへ
+    U->>G: ログイン and 同意
+    G-->>B: 302 to /api/auth/callback/google?code,state
+
+    Note over U,G: (2) コールバック（Cookieを書く=ブラウザがapi直叩き）
+    B->>API: GET /api/auth/callback/google?code,state<br/>Cookie: oauth_state / verifier / provider
+    API->>API: Cookieのstate == URLのstate ?<br/>不一致 → 400（CSRF防御）
+    API->>G: validateAuthorizationCode(code, verifier)
+    G-->>API: OAuth2Tokens（id_token 同梱）
+    API->>API: decodeIdToken(tokens.idToken())<br/>→ IdentityProfile に正規化<br/>(Provider.verify が内部で実施)
+    API->>DB: SELECT user_identities WHERE (provider, provider_sub)
+
+    alt 既存 Identity ヒット
+        API->>DB: db.batch([ UPDATE user_identities (email/name/picture/updated_at),<br/>UPDATE users.last_login_at,<br/>DELETE expired sessions (相乗り),<br/>INSERT sessions ])
+    else 未ヒット = 新規 User
+        API->>API: userId/identityId = ulid()<br/>sessionId = hex(getRandomValues 32B)
+        API->>DB: db.batch([ INSERT users, INSERT user_identities, INSERT sessions ])
+    end
+
+    API-->>B: 302 to /<br/>Set-Cookie: __Host-stacx_session（本番）/ stacx_session（ローカル）30日<br/>+ 一時Cookie3つを失効
+    B->>U: ログイン済みのトップ画面
+
+    Note over U,G: (3) 認証済みリクエスト（ミドルウェア=純SELECT）
+    U->>B: 保護ページ操作
+    B->>API: GET /api/...（web loader 経由 or 直）Cookie: session
+    API->>DB: SELECT users.id, ui.email/name/picture<br/>FROM sessions JOIN users JOIN user_identities ui<br/>WHERE sessions.id=? AND expires_at>now<br/>ORDER BY ui.updated_at DESC LIMIT 1
+    alt 有効
+        DB-->>API: 行あり
+        API->>API: c.var.user = {id, email, name, pictureUrl}
+        API-->>B: 200 データ
+    else 無効/期限切れ
+        DB-->>API: 行なし
+        API-->>B: 401 → ログイン画面へ
+    end
+
+    Note over U,G: (4) ログアウト（Cookieを書く=ブラウザがapi直叩き）
+    U->>B: form method="POST" action="/api/auth/logout"
+    B->>API: POST /api/auth/logout
+    API->>DB: DELETE FROM sessions WHERE id=?
+    API-->>B: 302 to /<br/>Set-Cookie: session 即時失効
