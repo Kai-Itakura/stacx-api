@@ -1,7 +1,7 @@
 {
-  "name": "stacx-api",
+  "name": "stacx",
   "version": "1.0.0",
-  "description": "",
+  "description": "StacX — 業務の学びを「1 分メモ」として蓄積し職務経歴書として再利用する個人向けアプリ（モノレポ）",
   "main": "index.js",
   "scripts": {
     "dev": "pnpm -r --parallel dev",
