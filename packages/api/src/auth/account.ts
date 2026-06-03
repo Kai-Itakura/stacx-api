@@ -2,7 +2,7 @@ import { and, eq, lt } from "drizzle-orm";
 import { ulid } from "ulid";
 import { sessions, userIdentities, users } from "../db/schema";
 import type { IdentityProfile } from "./providers/types";
-import { type DB, SESSION_TTL_MS, generateSessionId } from "./session";
+import { type DB, generateSessionId, SESSION_TTL_MS } from "./session";
 
 /** Session 行に残すリクエストメタ情報。 */
 export type SessionMeta = {
@@ -27,11 +27,7 @@ export type IssuedSession = {
  * 事前 SELECT は新規/既存の判定ヒントにすぎず、一意性の最終保証は
  * user_identities の UNIQUE(provider, provider_sub) に置く。
  */
-export async function loginWithIdentity(
-  db: DB,
-  profile: IdentityProfile,
-  meta: SessionMeta,
-): Promise<IssuedSession> {
+export async function loginWithIdentity(db: DB, profile: IdentityProfile, meta: SessionMeta): Promise<IssuedSession> {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + SESSION_TTL_MS);
   const sessionId = generateSessionId();
