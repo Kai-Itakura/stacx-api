@@ -18,6 +18,10 @@ build/
 .idea/
 *.swp
 
+# Claude Code（ローカル設定・一時ファイル。共有する .claude/settings.json 等は対象外）
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
 # OS
 .DS_Store
 Thumbs.db
