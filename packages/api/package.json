@@ -20,7 +20,8 @@
     "arctic": "^3.0.0",
     "drizzle-orm": "^0.36.0",
     "hono": "^4.6.0",
-    "ulid": "^2.3.0"
+    "ulid": "^2.3.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.8.61",

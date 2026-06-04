@@ -1,114 +1,70 @@
+import { z } from "zod";
 import type { CreateProjectInput, UpdateProjectInput } from "./project";
 
 /** バリデーション結果。成功なら value、失敗なら人間可読な error を持つ。 */
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
 
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null;
-}
+// JSON 由来のボディを検証する。HTTP 経由なので number は常に有限（JSON に Infinity/NaN は無い）。
+// 日付は epoch ミリ秒（number）または日付文字列を coerce で Date 化し、不正値は弾く。
 
-/** epoch ミリ秒（number）または日付文字列を Date に変換する。不正なら null。 */
-function toDate(v: unknown): Date | null {
-  if (typeof v !== "number" && typeof v !== "string") return null;
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
+/** POST /projects 用。未指定の任意項目は null に正規化する。 */
+const createSchema = z.object({
+  name: z.string().trim().min(1),
+  startDate: z.coerce.date(),
+  endDate: z.coerce
+    .date()
+    .nullish()
+    .transform((v) => v ?? null),
+  summary: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? null),
+  teamSize: z
+    .number()
+    .nullish()
+    .transform((v) => v ?? null),
+  role: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? null),
+  workStyle: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? null),
+});
 
-function isNonEmptyString(v: unknown): v is string {
-  return typeof v === "string" && v.trim().length > 0;
-}
+/** PUT /projects/:id 用。部分更新なので全項目任意。指定キーのみ出力に残る。 */
+const updateSchema = z
+  .object({
+    name: z.string().trim().min(1),
+    startDate: z.coerce.date(),
+    endDate: z.coerce.date().nullable(),
+    summary: z.string().nullable(),
+    teamSize: z.number().nullable(),
+    role: z.string().nullable(),
+    workStyle: z.string().nullable(),
+  })
+  .partial();
 
-/** 任意の文字列フィールド。未指定・null は null、文字列はそのまま、それ以外は error。 */
-function optionalString(v: unknown): ParseResult<string | null> {
-  if (v === undefined || v === null) return { ok: true, value: null };
-  if (typeof v !== "string") return { ok: false, error: "must be a string" };
-  return { ok: true, value: v };
+/** zod の safeParse 結果を ParseResult に変換する（先頭 issue を可読メッセージ化）。 */
+function toResult<T>(
+  parsed: { success: true; data: T } | { success: false; error: z.ZodError },
+): ParseResult<T> {
+  if (parsed.success) return { ok: true, value: parsed.data };
+  const issue = parsed.error.issues[0];
+  const path = issue?.path.join(".");
+  return {
+    ok: false,
+    error: path ? `${path}: ${issue?.message}` : (issue?.message ?? "invalid body"),
+  };
 }
 
 /** POST /projects のボディを CreateProjectInput に検証変換する。 */
 export function parseCreateInput(body: unknown): ParseResult<CreateProjectInput> {
-  if (!isRecord(body)) return { ok: false, error: "invalid body" };
-
-  if (!isNonEmptyString(body.name)) return { ok: false, error: "name is required" };
-
-  const startDate = toDate(body.startDate);
-  if (!startDate) return { ok: false, error: "startDate is required and must be a valid date" };
-
-  let endDate: Date | null = null;
-  if (body.endDate !== undefined && body.endDate !== null) {
-    const d = toDate(body.endDate);
-    if (!d) return { ok: false, error: "endDate is invalid" };
-    endDate = d;
-  }
-
-  if (body.teamSize !== undefined && body.teamSize !== null) {
-    if (typeof body.teamSize !== "number" || !Number.isFinite(body.teamSize)) {
-      return { ok: false, error: "teamSize must be a number" };
-    }
-  }
-
-  const summary = optionalString(body.summary);
-  if (!summary.ok) return { ok: false, error: `summary ${summary.error}` };
-  const role = optionalString(body.role);
-  if (!role.ok) return { ok: false, error: `role ${role.error}` };
-  const workStyle = optionalString(body.workStyle);
-  if (!workStyle.ok) return { ok: false, error: `workStyle ${workStyle.error}` };
-
-  return {
-    ok: true,
-    value: {
-      name: body.name,
-      startDate,
-      endDate,
-      summary: summary.value,
-      role: role.value,
-      workStyle: workStyle.value,
-      teamSize: (body.teamSize as number | null | undefined) ?? null,
-    },
-  };
+  return toResult(createSchema.safeParse(body));
 }
 
 /** PUT /projects/:id のボディを UpdateProjectInput に検証変換する（部分更新）。 */
 export function parseUpdateInput(body: unknown): ParseResult<UpdateProjectInput> {
-  if (!isRecord(body)) return { ok: false, error: "invalid body" };
-
-  const out: UpdateProjectInput = {};
-
-  if ("name" in body) {
-    if (!isNonEmptyString(body.name))
-      return { ok: false, error: "name must be a non-empty string" };
-    out.name = body.name;
-  }
-  if ("startDate" in body) {
-    const d = toDate(body.startDate);
-    if (!d) return { ok: false, error: "startDate is invalid" };
-    out.startDate = d;
-  }
-  if ("endDate" in body) {
-    if (body.endDate === null) {
-      out.endDate = null;
-    } else {
-      const d = toDate(body.endDate);
-      if (!d) return { ok: false, error: "endDate is invalid" };
-      out.endDate = d;
-    }
-  }
-  if ("teamSize" in body) {
-    if (body.teamSize === null) {
-      out.teamSize = null;
-    } else if (typeof body.teamSize !== "number" || !Number.isFinite(body.teamSize)) {
-      return { ok: false, error: "teamSize must be a number" };
-    } else {
-      out.teamSize = body.teamSize;
-    }
-  }
-  for (const key of ["summary", "role", "workStyle"] as const) {
-    if (key in body) {
-      const r = optionalString(body[key]);
-      if (!r.ok) return { ok: false, error: `${key} ${r.error}` };
-      out[key] = r.value;
-    }
-  }
-
-  return { ok: true, value: out };
+  return toResult(updateSchema.safeParse(body));
 }

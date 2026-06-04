@@ -225,6 +225,9 @@ importers:
       ulid:
         specifier: ^2.3.0
         version: 2.4.0
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@cloudflare/vitest-pool-workers':
         specifier: ^0.8.61
@@ -2439,6 +2442,9 @@ packages:
   zod@3.25.76:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+
 snapshots:
 
   '@babel/code-frame@7.29.7':
@@ -4221,3 +4227,5 @@ snapshots:
   zod@3.22.3: {}
 
   zod@3.25.76: {}
+
+  zod@4.4.3: {}
