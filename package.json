@@ -12,7 +12,8 @@
     "format": "biome format --write .",
     "check": "biome check --write .",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test"
+    "test": "pnpm -r test",
+    "test:coverage": "pnpm -r test:coverage"
   },
   "keywords": [],
   "author": "",
