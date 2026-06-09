@@ -1,0 +1,10 @@
+# Git hooks via lefthook（pnpm install の prepare で `lefthook install` が有効化）。
+# コミット前に staged ファイルだけ Biome で整形 + lint 自動修正し、
+# 修正結果を再ステージしてそのコミットに含める（手動の再コミット不要）。
+# 修正不能な lint エラーが残れば lefthook がコミットを中止する。
+pre-commit:
+  commands:
+    biome:
+      glob: "*.{ts,tsx,js,jsx,mjs,cjs,json,jsonc,css}"
+      run: pnpm exec biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
