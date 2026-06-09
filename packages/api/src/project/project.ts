@@ -2,20 +2,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { ulid } from "ulid";
 import type { DB } from "../auth/session";
 import { type Project, projects } from "../db/schema";
-
-/** Project 作成の入力。期間以外は任意。end_date 未指定は「進行中」を表す。 */
-export type CreateProjectInput = {
-  name: string;
-  startDate: Date;
-  endDate?: Date | null;
-  summary?: string | null;
-  teamSize?: number | null;
-  role?: string | null;
-  workStyle?: string | null;
-};
-
-/** Project 更新の入力。指定したフィールドのみ差し替える。 */
-export type UpdateProjectInput = Partial<CreateProjectInput>;
+import type { CreateProjectInput, UpdateProjectInput } from "./request-schema";
 
 /** Project を作成し、生成された行を返す。ID はアプリ側で ULID 採番する（ADR 0004）。 */
 export async function createProject(
