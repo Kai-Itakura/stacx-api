@@ -11,6 +11,7 @@ import {
   listProjects,
   updateProject,
 } from "../../src/project/project";
+import { createProjectSchema, updateProjectSchema } from "../../src/project/request-schema";
 
 const db = drizzle(env.DB, { schema });
 
@@ -22,7 +23,7 @@ async function seedUser(): Promise<string> {
   return id;
 }
 
-const input = {
+const base = {
   name: "決済基盤リプレイス",
   startDate: new Date("2024-01-01"),
   summary: "レガシー決済の刷新",
@@ -30,6 +31,11 @@ const input = {
   role: "バックエンドリード",
   workStyle: "受託",
 };
+
+/** branded な入力。ドメインは検証を通した値しか受け取らないので schema 経由で作る。 */
+const createInput = (o: Record<string, unknown> = {}) =>
+  createProjectSchema.parse({ ...base, ...o });
+const updateInput = (o: Record<string, unknown>) => updateProjectSchema.parse(o);
 
 describe("createProject", () => {
   beforeEach(async () => {
@@ -40,7 +46,7 @@ describe("createProject", () => {
   it("id・タイムスタンプ・userId を採番して永続化し、end_date 未指定は進行中(null)", async () => {
     const userId = await seedUser();
 
-    const created = await createProject(db, userId, input);
+    const created = await createProject(db, userId, createInput());
 
     expect(created.id).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/); // ULID
     expect(created.userId).toBe(userId);
@@ -63,8 +69,8 @@ describe("listProjects", () => {
   it("呼び出し User 自身の Project だけを返す", async () => {
     const me = await seedUser();
     const other = await seedUser();
-    await createProject(db, me, { ...input, name: "自分のA" });
-    await createProject(db, other, { ...input, name: "他人のB" });
+    await createProject(db, me, createInput({ name: "自分のA" }));
+    await createProject(db, other, createInput({ name: "他人のB" }));
 
     const list = await listProjects(db, me);
 
@@ -74,8 +80,8 @@ describe("listProjects", () => {
 
   it("開始日の新しい順で返す", async () => {
     const me = await seedUser();
-    await createProject(db, me, { ...input, name: "古い", startDate: new Date("2022-01-01") });
-    await createProject(db, me, { ...input, name: "新しい", startDate: new Date("2024-06-01") });
+    await createProject(db, me, createInput({ name: "古い", startDate: new Date("2022-01-01") }));
+    await createProject(db, me, createInput({ name: "新しい", startDate: new Date("2024-06-01") }));
 
     const list = await listProjects(db, me);
 
@@ -91,7 +97,7 @@ describe("getProject", () => {
 
   it("自分の Project は取得できる", async () => {
     const me = await seedUser();
-    const created = await createProject(db, me, input);
+    const created = await createProject(db, me, createInput());
 
     expect((await getProject(db, me, created.id))?.id).toBe(created.id);
   });
@@ -99,7 +105,7 @@ describe("getProject", () => {
   it("他人の Project は null（所有境界）", async () => {
     const me = await seedUser();
     const other = await seedUser();
-    const created = await createProject(db, other, input);
+    const created = await createProject(db, other, createInput());
 
     expect(await getProject(db, me, created.id)).toBeNull();
   });
@@ -113,12 +119,14 @@ describe("updateProject", () => {
 
   it("自分の Project を更新し updatedAt を進める", async () => {
     const me = await seedUser();
-    const created = await createProject(db, me, input);
+    const created = await createProject(db, me, createInput());
 
-    const updated = await updateProject(db, me, created.id, {
-      name: "改名後",
-      endDate: new Date("2024-12-31"),
-    });
+    const updated = await updateProject(
+      db,
+      me,
+      created.id,
+      updateInput({ name: "改名後", endDate: new Date("2024-12-31") }),
+    );
 
     expect(updated?.name).toBe("改名後");
     expect(updated?.endDate).toEqual(new Date("2024-12-31"));
@@ -128,10 +136,10 @@ describe("updateProject", () => {
   it("他人の Project は更新せず null を返す", async () => {
     const me = await seedUser();
     const other = await seedUser();
-    const created = await createProject(db, other, input);
+    const created = await createProject(db, other, createInput());
 
-    expect(await updateProject(db, me, created.id, { name: "乗っ取り" })).toBeNull();
-    expect((await db.select().from(projects))[0]?.name).toBe(input.name); // 不変
+    expect(await updateProject(db, me, created.id, updateInput({ name: "乗っ取り" }))).toBeNull();
+    expect((await db.select().from(projects))[0]?.name).toBe(base.name); // 不変
   });
 });
 
@@ -143,7 +151,7 @@ describe("deleteProject", () => {
 
   it("自分の Project を削除して true", async () => {
     const me = await seedUser();
-    const created = await createProject(db, me, input);
+    const created = await createProject(db, me, createInput());
 
     expect(await deleteProject(db, me, created.id)).toBe(true);
     expect(await db.select().from(projects)).toHaveLength(0);
@@ -152,7 +160,7 @@ describe("deleteProject", () => {
   it("他人の Project は削除せず false", async () => {
     const me = await seedUser();
     const other = await seedUser();
-    const created = await createProject(db, other, input);
+    const created = await createProject(db, other, createInput());
 
     expect(await deleteProject(db, me, created.id)).toBe(false);
     expect(await db.select().from(projects)).toHaveLength(1);

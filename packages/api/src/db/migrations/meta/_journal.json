@@ -15,6 +15,13 @@
       "when": 1780611093953,
       "tag": "0001_daily_surge",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1780731587421,
+      "tag": "0002_shiny_the_fury",
+      "breakpoints": true
     }
   ]
 }
