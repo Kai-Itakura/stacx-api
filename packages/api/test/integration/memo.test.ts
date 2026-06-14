@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { ulid } from "ulid";
-import { beforeEach, describe, expect, it } from "vitest";
+import { assert, beforeEach, describe, expect, it } from "vitest";
 import * as schema from "../../src/db/schema";
 import { memos, memoTags, projects, tags, users } from "../../src/db/schema";
 import { createMemo, deleteMemo, getMemo, listMemos, updateMemo } from "../../src/memo/memo";
@@ -181,6 +181,55 @@ describe("updateMemo", () => {
     await updateMemo(db, me, id, updateInput({ body: "本文だけ更新" }));
 
     expect((await getMemo(db, me, id))?.tagIds).toEqual([t1]);
+  });
+
+  it("tagIds が０個なら タグはすべて外れる", async () => {
+    const me = await seedUser();
+    const p = await seedProject(me);
+    const t1 = await seedTag(me, "この後外れる1");
+    const t2 = await seedTag(me, "この後外れる2");
+    const created = await createMemo(db, me, createInput({ projectId: p, tagIds: [t1, t2] }));
+    assert(created.ok, "メモのシード作成失敗");
+
+    const updated = await updateMemo(db, me, created.memo.id, updateInput({ tagIds: [] }));
+
+    assert.isTrue(updated.ok);
+    expect((await getMemo(db, me, updated.memo.id))?.tagIds).toEqual([]);
+  });
+
+  it("userが所有していないtagは指定できない", async () => {
+    const me = await seedUser();
+    const other = await seedUser();
+    const project = await seedProject(me, "dummy project1");
+    const myTag = await seedTag(me, "dummy tag1");
+    const ohtersTag = await seedTag(other, "dummy tag2");
+    const created = await createMemo(
+      db,
+      me,
+      createInput({
+        projectId: project,
+        title: "dummy title",
+        body: "dummy memo",
+        tagIds: [myTag],
+      }),
+    );
+    assert(created.ok, "メモのシード作成失敗");
+
+    expect(
+      await updateMemo(
+        db,
+        me,
+        created.memo.id,
+        updateInput({
+          title: "dummy title",
+          body: "dummy memo",
+          tagIds: [myTag, ohtersTag],
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      reason: "tag_not_found",
+    });
   });
 
   it("他人のメモは not_found", async () => {

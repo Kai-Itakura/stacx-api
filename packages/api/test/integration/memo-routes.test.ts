@@ -52,6 +52,36 @@ async function seedProject(userId: string): Promise<string> {
   return id;
 }
 
+async function seedTag(userId: string, name: string): Promise<string> {
+  const id = ulid();
+  await db.insert(tags).values({ id, userId, name, createdAt: new Date() });
+  return id;
+}
+
+/** fixture 用のメモを直接生成して id を返す（検証対象のルートを経由しない）。 */
+async function seedMemo(
+  userId: string,
+  projectId: string,
+  opts: { title?: string; body?: string; tagIds?: string[] } = {},
+): Promise<string> {
+  const id = ulid();
+  const now = new Date();
+  await db.insert(memos).values({
+    id,
+    userId,
+    projectId,
+    title: opts.title ?? "メモ",
+    body: opts.body ?? "本文",
+    createdAt: now,
+    updatedAt: now,
+  });
+  if (opts.tagIds?.length) {
+    await db.insert(memoTags).values(opts.tagIds.map((tagId) => ({ memoId: id, tagId })));
+  }
+  return id;
+}
+
+/** POST ルート自体を検証するためのリクエスト。fixture 作成には使わない（seedMemo を使う）。 */
 async function postMemo(cookie: string, body: unknown) {
   return SELF.fetch(`${BASE}/api/memos`, {
     method: "POST",
@@ -112,13 +142,9 @@ describe("memo routes", () => {
     const bob = await loginAs("bob");
     const pa = await seedProject(userId);
     const pb = await seedProject(userId);
-    await postMemo(cookie, { projectId: pa, title: "a1", body: "b" });
-    await postMemo(cookie, { projectId: pb, title: "b1", body: "b" });
-    await postMemo(bob.cookie, {
-      projectId: await seedProject(bob.userId),
-      title: "他人",
-      body: "b",
-    });
+    await seedMemo(userId, pa, { title: "a1" });
+    await seedMemo(userId, pb, { title: "b1" });
+    await seedMemo(bob.userId, await seedProject(bob.userId), { title: "他人" });
 
     const all = (await (await SELF.fetch(`${BASE}/api/memos`, { headers: { cookie } })).json()) as {
       memos: { title: string }[];
@@ -131,39 +157,99 @@ describe("memo routes", () => {
     expect(filtered.memos.map((m) => m.title)).toEqual(["a1"]);
   });
 
-  it("GET/DELETE /:id は他人のメモだと 404", async () => {
-    const alice = await loginAs("alice");
-    const bob = await loginAs("bob");
-    const created = (await (
-      await postMemo(alice.cookie, {
-        projectId: await seedProject(alice.userId),
-        title: "t",
-        body: "b",
-      })
-    ).json()) as { memo: { id: string } };
-    const url = `${BASE}/api/memos/${created.memo.id}`;
+  it("GET /:id 自分のメモは 200 で tagIds 込みで返す", async () => {
+    const { cookie, userId } = await loginAs("alice");
+    const t = await seedTag(userId, "トラブル");
+    const id = await seedMemo(userId, await seedProject(userId), { title: "学び", tagIds: [t] });
 
-    expect((await SELF.fetch(url, { headers: { cookie: bob.cookie } })).status).toBe(404);
-    expect(
-      (await SELF.fetch(url, { method: "DELETE", headers: { cookie: bob.cookie } })).status,
-    ).toBe(404);
-    expect(
-      (await SELF.fetch(url, { method: "DELETE", headers: { cookie: alice.cookie } })).status,
-    ).toBe(204);
+    const res = await SELF.fetch(`${BASE}/api/memos/${id}`, { headers: { cookie } });
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { memo: { id: string; title: string; tagIds: string[] } };
+    expect(json.memo.id).toBe(id);
+    expect(json.memo.tagIds).toEqual([t]);
   });
 
-  it("PUT /:id で title 更新", async () => {
-    const { cookie, userId } = await loginAs("alice");
-    const created = (await (
-      await postMemo(cookie, { projectId: await seedProject(userId), title: "旧", body: "b" })
-    ).json()) as { memo: { id: string } };
+  it("GET /:id 他人のメモは 404", async () => {
+    const alice = await loginAs("alice");
+    const bob = await loginAs("bob");
+    const id = await seedMemo(alice.userId, await seedProject(alice.userId));
 
-    const res = await SELF.fetch(`${BASE}/api/memos/${created.memo.id}`, {
+    const res = await SELF.fetch(`${BASE}/api/memos/${id}`, { headers: { cookie: bob.cookie } });
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toStrictEqual({ error: "not_found" });
+  });
+
+  it("DELETE /:id 自分のメモは 204", async () => {
+    const { cookie, userId } = await loginAs("alice");
+    const id = await seedMemo(userId, await seedProject(userId));
+
+    const res = await SELF.fetch(`${BASE}/api/memos/${id}`, {
+      method: "DELETE",
+      headers: { cookie },
+    });
+
+    expect(res.status).toBe(204);
+    expect(await db.select().from(memos).where(eq(memos.id, id))).toHaveLength(0);
+  });
+
+  it("DELETE /:id 他人のメモは 404 で、メモは削除されない", async () => {
+    const alice = await loginAs("alice");
+    const bob = await loginAs("bob");
+    const id = await seedMemo(alice.userId, await seedProject(alice.userId));
+
+    const res = await SELF.fetch(`${BASE}/api/memos/${id}`, {
+      method: "DELETE",
+      headers: { cookie: bob.cookie },
+    });
+
+    expect(res.status).toBe(404);
+    expect(await db.select().from(memos).where(eq(memos.id, id))).toHaveLength(1);
+  });
+
+  it("PUT /:id で title 更新 → 200", async () => {
+    const { cookie, userId } = await loginAs("alice");
+    const id = await seedMemo(userId, await seedProject(userId), { title: "旧" });
+
+    const res = await SELF.fetch(`${BASE}/api/memos/${id}`, {
       method: "PUT",
       headers: { cookie, "content-type": "application/json" },
       body: JSON.stringify({ title: "新" }),
     });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { memo: { title: string } }).memo.title).toBe("新");
+  });
+
+  it("PUT /:id は他人のメモだと 404 not_found", async () => {
+    const alice = await loginAs("alice");
+    const bob = await loginAs("bob");
+    const id = await seedMemo(alice.userId, await seedProject(alice.userId));
+
+    const res = await SELF.fetch(`${BASE}/api/memos/${id}`, {
+      method: "PUT",
+      headers: { cookie: bob.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ title: "乗っ取り" }),
+    });
+
+    expect(res.status).toBe(404);
+    expect(await res.json()).toStrictEqual({ error: "not_found" });
+  });
+
+  it("PUT /:id は他人の tagId だと 400 tag_not_found", async () => {
+    const alice = await loginAs("alice");
+    const bob = await loginAs("bob");
+    const myTag = await seedTag(alice.userId, "自分のタグ");
+    const foreignTag = await seedTag(bob.userId, "他人のタグ");
+    const id = await seedMemo(alice.userId, await seedProject(alice.userId), { tagIds: [myTag] });
+
+    const res = await SELF.fetch(`${BASE}/api/memos/${id}`, {
+      method: "PUT",
+      headers: { cookie: alice.cookie, "content-type": "application/json" },
+      body: JSON.stringify({ tagIds: [myTag, foreignTag] }),
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toStrictEqual({ error: "tag_not_found" });
   });
 });
